@@ -1,0 +1,72 @@
+name: projects
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  image_picker: ^1.0.7
+  google_mlkit_text_recognition: ^0.14.0
+  sqflite: ^2.3.0
+  path: ^1.8.3
+  cupertino_icons: ^1.0.8
+  flutter_local_notifications: ^17.0.0
+  timezone: ^0.9.2
+  shared_preferences: ^2.2.2
+  cunning_document_scanner: ^1.1.0
+  add_2_calendar: ^3.0.1
+  google_sign_in:
+  googleapis:
+  extension_google_sign_in_as_googleapis_auth:
+  permission_handler: ^11.3.1
+  camera: ^0.11.0
+  device_calendar: ^4.3.2
+  firebase_core: ^4.4.0
+  path_provider: ^2.1.2
+  flutter_timezone: ^3.0.1
+
+dev_dependencies:
+  flutter_launcher_icons: ^0.14.4
+  flutter_test:
+    sdk: flutter
+  flutter_native_splash: ^2.4.0
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/picture/s.png
+    - assets/icon.png  # ← ADD THIS LINE
+
+
+
+# ============ ADD THIS ENTIRE SECTION ============
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon.png"
+  remove_alpha_ios: true
+# =================================================
+
+flutter_native_splash:
+
+  background_image: "assets/picture/s.png"
+
+  android_12:
+
+    background_image: "assets/picture/s.png"
+    image: "assets/icon.png"
+    icon_background_color: "#050B2C"
+    color: "#050B2C"
+    # Image positioning
+  android_gravity: fill
+  ios_content_mode: scaleAspectFill
+  android: true
+  ios: true
+  fullscreen: true
