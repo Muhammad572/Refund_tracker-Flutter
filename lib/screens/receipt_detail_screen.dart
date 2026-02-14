@@ -4,6 +4,8 @@ import '../services/database_service.dart'; // Needed for Delete
 import 'ocr_screen.dart'; // Needed for Edit
 import '../models/receipt_model.dart'; // Needed for Edit
 import '../services/notification_service.dart'; // Added to handle cancellation
+// --- IMPORTANT: Import your list screen here ---
+import 'refund_list_screen.dart';
 
 class ReceiptDetailScreen extends StatelessWidget {
   final Map<String, dynamic> receipt;
@@ -25,17 +27,40 @@ class ReceiptDetailScreen extends StatelessWidget {
     final deadlineDate = DateTime.parse(receipt['refundDeadline'] ?? DateTime.now().toIso8601String());
     final statusColor = _getStatusColor(deadlineDate);
 
-    // FIXED: Intercept back button to return to Home Screen safely
+    // FIXED: Intercept back button to return to Refund List safely
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        // Forces the app to go to the Home list screen
-        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+
+        // Agar notification se aaye hain toh ye seedha List par le jayega
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        } else {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const RefundListScreen()),
+                (route) => false,
+          );
+        }
       },
       child: Scaffold(
         appBar: AppBar(
           title: Text(receipt['storeName'] ?? "Receipt"),
+          // --- FIXED: ADDED MANUAL BACK BUTTON FOR NOTIFICATION STATE ---
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              } else {
+                // Safety: go to list if no history
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (context) => const RefundListScreen()),
+                      (route) => false,
+                );
+              }
+            },
+          ),
           // --- NEW: STEP 7.7 EDIT BUTTON ---
           actions: [
             IconButton(
@@ -52,7 +77,6 @@ class ReceiptDetailScreen extends StatelessWidget {
                         purchaseDate: DateTime.parse(receipt['purchaseDate']),
                         refundDeadline: deadlineDate,
                         imagePath: receipt['imagePath'],
-                        // --- FIXED: PASSING NOTES AND TEXT TO EDIT SCREEN ---
                         fullText: receipt['fullText'] ?? "",
                         notes: receipt['notes'] ?? "",
                       ),
@@ -67,7 +91,6 @@ class ReceiptDetailScreen extends StatelessWidget {
           child: Column(
             children: [
               // Display the scanned image
-              // --- NEW: STEP 7.7 TAP -> FULLSCREEN ---
               GestureDetector(
                 onTap: () {
                   if (receipt['imagePath'] != null && receipt['imagePath'] != "") {
@@ -84,7 +107,6 @@ class ReceiptDetailScreen extends StatelessWidget {
                   height: 300,
                   width: double.infinity,
                   color: Colors.black12,
-                  // LOOPHOLE FIX: Added null check and existence check
                   child: (receipt['imagePath'] != null && receipt['imagePath'] != "" && File(receipt['imagePath']).existsSync())
                       ? Image.file(File(receipt['imagePath']), fit: BoxFit.cover)
                       : const Icon(Icons.image_not_supported, size: 100),
@@ -114,13 +136,11 @@ class ReceiptDetailScreen extends StatelessWidget {
                     ),
 
                     const SizedBox(height: 20),
-                    // Added Purchase Date display
                     Text("Purchase Date: ${receipt['purchaseDate'] ?? 'N/A'}",
                         style: const TextStyle(fontSize: 16, color: Colors.grey)),
 
                     const Divider(height: 40),
                     const Text("Notes:", style: TextStyle(fontWeight: FontWeight.bold)),
-                    // --- FIXED: ENSURING NOTES SHOW FROM DATABASE KEY ---
                     Text(receipt['notes'] != null && receipt['notes'].toString().isNotEmpty
                         ? receipt['notes']
                         : "No notes added"),
@@ -149,10 +169,13 @@ class ReceiptDetailScreen extends StatelessWidget {
                             ),
                           );
                           if (confirm == true) {
-                            // Rule: Cancel notification when receipt deleted
                             await NotificationService().cancelNotification(receipt['id'].hashCode);
                             await DatabaseService().deleteReceipt(receipt['id']);
-                            Navigator.pop(context);
+                            // Go back to the list screen
+                            Navigator.of(context).pushAndRemoveUntil(
+                              MaterialPageRoute(builder: (context) => const RefundListScreen()),
+                                  (route) => false,
+                            );
                           }
                         },
                         icon: const Icon(Icons.delete),

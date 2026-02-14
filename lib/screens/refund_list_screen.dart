@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // SYSTEM NAVIGATOR KE LIYE ZAROORI HAI
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
@@ -9,6 +10,7 @@ import '../services/notification_service.dart';
 import 'ocr_screen.dart';
 import 'receipt_detail_screen.dart';
 import '../models/receipt_model.dart';
+import 'onboarding_screen.dart';
 
 class RefundListScreen extends StatefulWidget {
   const RefundListScreen({super.key});
@@ -81,7 +83,7 @@ class _RefundListScreenState extends State<RefundListScreen> {
           DateTime dateA = DateTime.parse(a['refundDeadline']);
           DateTime dateB = DateTime.parse(b['refundDeadline']);
           DateTime now = DateTime.now();
-          final today = DateTime(now.year, now.month, now.day);
+          final today = DateTime(now.year, now.month, now.day); // Note: using today.day here
 
           int getPriority(DateTime deadline) {
             final deadlineDate = DateTime(deadline.year, deadline.month, deadline.day);
@@ -122,7 +124,6 @@ class _RefundListScreenState extends State<RefundListScreen> {
     final amount = double.tryParse(receipt['amount'].toString()) ?? 0.0;
     final baseId = receipt['id'].hashCode.abs();
 
-    // --- REPLACED OLD 7/2 DAY LOGIC WITH SMART REMINDERS ---
     await NotificationService().scheduleSmartReminders(
       receiptId: baseId,
       storeName: store,
@@ -148,13 +149,11 @@ class _RefundListScreenState extends State<RefundListScreen> {
 
   Color _getStatusColor(DateTime deadline) {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final deadlineDate = DateTime(deadline.year, deadline.month, deadline.day);
-    final difference = deadlineDate.difference(today).inDays;
-
-    if (deadlineDate.isBefore(today) || deadlineDate.isAtSameMomentAs(today)) {
+    if (now.isAfter(deadline)) {
       return Colors.red;
-    } else if (difference <= 7) {
+    }
+    final difference = deadline.difference(now).inDays;
+    if (difference <= 7) {
       return Colors.orange;
     } else {
       return Colors.green;
@@ -163,36 +162,56 @@ class _RefundListScreenState extends State<RefundListScreen> {
 
   String _getStatusLabel(DateTime deadline) {
     final now = DateTime.now();
-    final deadlineDate = DateTime(deadline.year, deadline.month, deadline.day);
-    final difference = deadlineDate.difference(DateTime(now.year, now.month, now.day)).inDays;
-
-    if (deadlineDate.isBefore(DateTime(now.year, now.month, now.day)) ||
-        deadlineDate.isAtSameMomentAs(DateTime(now.year, now.month, now.day))) return "Expired";
-    if (difference <= 7) return "Expiring Soon";
+    if (now.isAfter(deadline)) {
+      return "Expired";
+    }
+    final difference = deadline.difference(now).inDays;
+    if (difference <= 7) {
+      return "Expiring Soon";
+    }
     return "Active";
   }
 
   String _getDaysText(DateTime deadline) {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final deadlineDate = DateTime(deadline.year, deadline.month, deadline.day);
-    final difference = deadlineDate.difference(today).inDays;
-
-    if (deadlineDate.isBefore(today)) return "Past";
-    if (deadlineDate.isAtSameMomentAs(today)) return "Today";
-    return "$difference Days";
+    if (now.isAfter(deadline)) return "Past";
+    final diff = deadline.difference(now);
+    if (diff.inDays >= 1) {
+      return "${diff.inDays} Days";
+    } else if (diff.inHours >= 1) {
+      return "${diff.inHours} Hours";
+    } else {
+      return "${diff.inMinutes} Mins";
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false,
+      canPop: false, // Mobile back button bypass kar dia
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        Navigator.pop(context);
+
+        // ZABARDASTI: Sab khatam karke Onboarding par bhej raha hoon
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const OnboardingScreen()),
+              (route) => false,
+        );
       },
       child: Scaffold(
         appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              // ZABARDASTI: App back button bhi Onboarding par hi jayega
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (context) => const OnboardingScreen()),
+                    (route) => false,
+              );
+            },
+          ),
           title: _isSearching
               ? TextField(
             controller: _searchController,
@@ -383,6 +402,26 @@ class _RefundListScreenState extends State<RefundListScreen> {
               child: const Icon(Icons.add),
             ),
           ],
+        ),
+        bottomNavigationBar: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 60.0),
+          child: BottomNavigationBar(
+            type: BottomNavigationBarType.fixed,
+            currentIndex: 1,
+            elevation: 0,
+            onTap: (index) {
+              if (index == 0) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const OcrScreen()),
+                );
+              }
+            },
+            items: const [
+              BottomNavigationBarItem(icon: Icon(Icons.camera_alt), label: "Scan"),
+              BottomNavigationBarItem(icon: Icon(Icons.receipt_long), label: "List Refunds"),
+            ],
+          ),
         ),
       ),
     );

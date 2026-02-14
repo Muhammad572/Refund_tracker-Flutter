@@ -12,7 +12,7 @@ import 'screens/receipt_detail_screen.dart'; // Required for navigation
 import 'package:timezone/timezone.dart' as tz; // Added for timezone support
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:flutter_native_splash/flutter_native_splash.dart';
-
+import 'screens/refund_list_screen.dart';
 // --- 9.2: GLOBAL NAVIGATOR KEY ---
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -35,59 +35,96 @@ void main() async {
   await NotificationService().init((String? payload) async {
     if (payload != null) {
       final dbReceipts = await DatabaseService().getReceipts();
-      // Find the specific receipt using the ID from the payload
       final receiptData = dbReceipts.firstWhere(
             (r) => r['id'].hashCode.toString() == payload || r['id'].toString() == payload,
         orElse: () => {},
       );
 
       if (receiptData.isNotEmpty) {
-        // Store for if/else logic
-        notificationReceipt = receiptData;
-
-        // Push logic for background state
-        Future.delayed(const Duration(milliseconds: 1200), () async {
-          navigatorKey.currentState?.push(
-            MaterialPageRoute(
-              builder: (context) => ReceiptDetailScreen(receipt: receiptData),
-            ),
-          );
+        // Wait 1.2s to ensure the engine is ready
+        Future.delayed(const Duration(milliseconds: 1200), () {
+          if (navigatorKey.currentState != null) {
+            // YE FIX HAI: Pehle HomeScreen load hogi, phir uske upar Detail aayegi
+            // Is se back button list par wapas le jayega
+            navigatorKey.currentState?.pushAndRemoveUntil(
+              MaterialPageRoute(builder: (context) => const RefundListScreen()),
+                  (route) => false,
+            );
+            navigatorKey.currentState?.push(
+              MaterialPageRoute(builder: (context) => ReceiptDetailScreen(receipt: receiptData)),
+            );
+          }
         });
       }
     }
   });
+  // --- FIX: CHECK IF APP WAS OPENED FROM KILL STATE BY NOTIFICATION ---
+  final NotificationAppLaunchDetails? launchDetails =
+  await NotificationService().flutterLocalNotificationsPlugin.getNotificationAppLaunchDetails();
 
-  // --- 8.3 ANDROID PERMISSION REQUEST (Android 13+) ---
-  await NotificationService()
+  if (launchDetails?.didNotificationLaunchApp ?? false) {
+    String? payload = launchDetails?.notificationResponse?.payload;
+    if (payload != null) {
+      final dbReceipts = await DatabaseService().getReceipts();
+      final receiptData = dbReceipts.firstWhere(
+            (r) => r['id'].hashCode.toString() == payload || r['id'].toString() == payload,
+        orElse: () => {},
+      );
+      if (receiptData.isNotEmpty) {
+        notificationReceipt = receiptData;
+      }
+    }
+  }
+
+  // --- 8.3 ANDROID PERMISSION REQUEST (Android 13, 14+) ---
+  final dynamic androidPlugin = NotificationService()
       .flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<
-      AndroidFlutterLocalNotificationsPlugin>()
-      ?.requestNotificationsPermission();
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
+  // 1. Request Normal Notification Permission
+  await androidPlugin?.requestNotificationsPermission();
+
+  // 2. SPECIAL FIX FOR SAMSUNG/PIXEL: Exact Alarm Check
+  if (Platform.isAndroid) {
+    // Check if the permission is available for this version of the plugin
+    try {
+      final bool isAllowed = await androidPlugin?.canScheduleExactAlarms() ?? true;
+
+      if (!isAllowed) {
+        // User ko settings screen par le jayega
+        await androidPlugin?.requestExactAlarmsPermission();
+      }
+    } catch (e) {
+      // Agar purana version hai aur method nahi mil raha, toh safe exit
+      debugPrint("Exact Alarms not supported or already handled: $e");
+    }
+  }
 
   // --- 8.2 RULE: RESCHEDULE ALL NOTIFICATIONS ON APP LAUNCH ---
-  // FIXED: Added a 2-second delay and a cancelAll() to stop duplicate spam and Realme crashes
+  // FIXED: Added a 2-second delay to ensure DB and Permissions are ready
   Future.delayed(const Duration(seconds: 2), () async {
+    // Kill existing notifications to avoid duplicates and fix background sync
     await NotificationService().flutterLocalNotificationsPlugin.cancelAll();
 
     final dbReceipts = await DatabaseService().getReceipts();
-    final now = DateTime.now();
 
     for (var r in dbReceipts) {
       final deadline = DateTime.parse(r['refundDeadline']);
       final store = r['storeName'].toString();
-      final amount = double.tryParse(r['amount'].toString()) ?? 0.0; // Keep as double for smart service
+      final amount = double.tryParse(r['amount'].toString()) ?? 0.0;
       final baseId = r['id'].hashCode.abs();
 
-      // --- FIXED: Replaced manual 7/2 day scheduling with the Smart Reminder Call ---
-      await NotificationService().scheduleSmartReminders(
-        receiptId: baseId,
-        storeName: store,
-        amount: amount,
-        deadline: deadline,
-      );
+      // Ensure notification is only scheduled for future dates
+      if (deadline.isAfter(DateTime.now())) {
+        await NotificationService().scheduleSmartReminders(
+          receiptId: baseId,
+          storeName: store,
+          amount: amount,
+          deadline: deadline,
+        );
+      }
     }
   });
-
   // Check if user has seen onboarding
   final prefs = await SharedPreferences.getInstance();
   final bool hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
@@ -170,7 +207,7 @@ class MyApp extends StatelessWidget {
       // --- IF/ELSE LOGIC ADDED HERE AS REQUESTED ---
       home: notificationReceipt != null
           ? ReceiptDetailScreen(receipt: notificationReceipt!)
-          : (showOnboarding ? const OnboardingScreen() : const MainWrapper()),
+          : (showOnboarding ? const OnboardingScreen() : const OnboardingScreen()),
     );
   }
 }

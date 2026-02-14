@@ -18,7 +18,16 @@ class NotificationService {
     tz.setLocalLocation(tz.getLocation(timeZoneName));
 
     const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
+
+    // ADD THIS FOR iOS
+    const DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
+    const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid,
+      iOS: initializationSettingsIOS,);
 
     await flutterLocalNotificationsPlugin.cancelAll();
 
@@ -61,10 +70,11 @@ class NotificationService {
     // 1. RULE: DEADLINE TOMORROW (24 hours before)
     final date1DayBefore = deadline.subtract(const Duration(days: 1));
     if (date1DayBefore.isAfter(now)) {
+      // UPDATED: Title showing store, amount and "1 day left"
       await scheduleNotification(
           receiptId + 1000,
-          "Deadline Tomorrow!",
-          "Last chance for $storeName • \$${amount.toStringAsFixed(2)}",
+          "$storeName - \$${amount.toStringAsFixed(2)}",
+          "Expire in 1 day left",
           date1DayBefore,
           payload: receiptId.toString() // ADDED PAYLOAD
       );
@@ -73,10 +83,11 @@ class NotificationService {
     // 2. RULE: 1 HOUR BEFORE EXPIRE
     final oneHourBefore = deadline.subtract(const Duration(hours: 1));
     if (oneHourBefore.isAfter(now)) {
+      // UPDATED: Title showing store, amount and "1 hour left"
       await scheduleNotification(
           receiptId + 500, // Unique ID for 1 hour warning
-          "Expires in 1 Hour!",
-          "Your return for $storeName expires very soon.",
+          "$storeName - \$${amount.toStringAsFixed(2)}",
+          "Expire in 1 hour left",
           oneHourBefore,
           payload: receiptId.toString() // ADDED PAYLOAD
       );
@@ -86,8 +97,8 @@ class NotificationService {
     if (deadline.isAfter(now)) {
       await scheduleNotification(
           receiptId,
+          "$storeName - \$${amount.toStringAsFixed(2)}",
           "Refund Deadline: EXPIRED",
-          "The deadline for $storeName has reached.",
           deadline,
           payload: receiptId.toString() // ADDED PAYLOAD
       );

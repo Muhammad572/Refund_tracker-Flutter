@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'ocr_screen.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'refund_list_screen.dart';
 
 class MainWrapper extends StatefulWidget {
   const MainWrapper({super.key});
@@ -23,6 +24,7 @@ class _MainWrapperState extends State<MainWrapper> {
   // The two tabs: My Refunds and Scan
   final List<Widget> _pages = [
     const OcrScreen(),
+    const RefundListScreen(),
   ];
 
   void _onItemTapped(int index) {

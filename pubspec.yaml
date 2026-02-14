@@ -1,5 +1,5 @@
-name: projects
-description: "A new Flutter project."
+name:  projects
+description: "OCR tracker"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -16,7 +16,7 @@ dependencies:
   sqflite: ^2.3.0
   path: ^1.8.3
   cupertino_icons: ^1.0.8
-  flutter_local_notifications: ^17.0.0
+  flutter_local_notifications: ^17.2.4
   timezone: ^0.9.2
   shared_preferences: ^2.2.2
   cunning_document_scanner: ^1.1.0
@@ -43,7 +43,6 @@ flutter:
   assets:
     - assets/picture/s.png
     - assets/icon.png  # ← ADD THIS LINE
-
 
 
 # ============ ADD THIS ENTIRE SECTION ============
