@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:camera/camera.dart';
-import 'package:device_calendar/device_calendar.dart'; // Added for 10.1
-import 'package:timezone/timezone.dart' as tz; // Added for 10.1
+import 'package:device_calendar/device_calendar.dart';// Added for 10.1
 import 'package:path_provider/path_provider.dart'; // Added for Step 7
 import 'package:path/path.dart' as p; // Added for Step 7
 import '../services/database_service.dart';
@@ -13,6 +12,8 @@ import '../services/notification_service.dart';
 import '../services/ocr_service.dart';
 import 'onboarding_screen.dart'; // Added import to allow navigation back
 import 'receipt_detail_screen.dart'; // Added for direct navigation
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tz;
 
 class OcrScreen extends StatefulWidget {
   final Receipt? existingReceipt;
@@ -45,26 +46,55 @@ class _OcrScreenState extends State<OcrScreen> {
   String _selectedCategory = "General";
   final List<String> _categories = ["General", "Electronics", "Clothing", "Groceries", "Dining", "Others"];
 
-  // --- 10.1: CALENDAR SYNC LOGIC ---
   final DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
 
-  Future<void> _syncToCalendar({required String storeName, required double amount, required DateTime deadline}) async {
+  Future<void> _syncToCalendar({
+    required String storeName,
+    required double amount,
+    required DateTime deadline,
+  }) async {
     try {
-      var permissions = await _calendarPlugin.requestPermissions();
-      if (permissions.isSuccess && permissions.data!) {
-        final calendars = await _calendarPlugin.retrieveCalendars();
-        if (calendars.isSuccess && calendars.data!.isNotEmpty) {
-          Calendar defaultCal = calendars.data!.first;
+      // Request permission
+      final permissions = await _calendarPlugin.requestPermissions();
 
-          Event event = Event(defaultCal.id);
-          event.title = "Refund Deadline: $storeName";
-          event.description = "Category: $_selectedCategory. Amount: \$${amount.toStringAsFixed(2)}. Notes: ${_notesController.text}";
+      if (!(permissions.isSuccess && permissions.data == true)) {
+        debugPrint("Calendar permission denied");
+        return;
+      }
 
-          event.start = tz.TZDateTime.from(deadline, tz.local);
-          event.end = tz.TZDateTime.from(deadline.add(const Duration(hours: 1)), tz.local);
+      // Get calendars
+      final calendarsResult = await _calendarPlugin.retrieveCalendars();
 
-          await _calendarPlugin.createOrUpdateEvent(event);
-        }
+      if (!calendarsResult.isSuccess ||
+          calendarsResult.data == null ||
+          calendarsResult.data!.isEmpty) {
+        debugPrint("No calendar found");
+        return;
+      }
+
+      // Use default calendar
+      final Calendar calendar = calendarsResult.data!.first;
+
+      final location = tz.local;
+      final Event event = Event(
+        calendar.id,
+        title: "Refund Deadline: $storeName",
+        description:
+        "Category: $_selectedCategory\n"
+            "Amount: \$${amount.toStringAsFixed(2)}\n"
+            "Notes: ${_notesController.text}",
+        start: tz.TZDateTime.from(deadline, location),
+        end: tz.TZDateTime.from(
+          deadline.add(const Duration(hours: 1)),
+          location,
+        ),
+      );
+
+      final createResult =
+      await _calendarPlugin.createOrUpdateEvent(event);
+
+      if (createResult?.isSuccess ?? false) {
+        debugPrint("Calendar event added silently ✅");
       }
     } catch (e) {
       debugPrint("Calendar Sync Error: $e");
