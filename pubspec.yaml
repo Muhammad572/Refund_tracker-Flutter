@@ -21,15 +21,13 @@ dependencies:
   shared_preferences: ^2.2.2
   cunning_document_scanner: ^1.1.0
   add_2_calendar: ^3.0.1
-  google_sign_in:
-  googleapis:
   extension_google_sign_in_as_googleapis_auth:
   permission_handler: ^11.3.1
   camera: ^0.11.0
   device_calendar: ^4.3.3
-  firebase_core: ^4.4.0
   path_provider: ^2.1.2
   flutter_timezone: ^3.0.1
+  in_app_purchase: ^3.2.0
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4

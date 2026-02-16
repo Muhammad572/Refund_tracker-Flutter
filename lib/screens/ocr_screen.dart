@@ -6,12 +6,15 @@ import 'package:camera/camera.dart';
 import 'package:device_calendar/device_calendar.dart';// Added for 10.1
 import 'package:path_provider/path_provider.dart'; // Added for Step 7
 import 'package:path/path.dart' as p; // Added for Step 7
+import 'package:in_app_purchase/in_app_purchase.dart'; // Added for IAP
+import 'package:shared_preferences/shared_preferences.dart'; // Added for Free Trial check
 import '../services/database_service.dart';
 import '../models/receipt_model.dart';
 import '../services/notification_service.dart';
 import '../services/ocr_service.dart';
 import 'onboarding_screen.dart'; // Added import to allow navigation back
 import 'receipt_detail_screen.dart'; // Added for direct navigation
+import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 
@@ -47,6 +50,10 @@ class _OcrScreenState extends State<OcrScreen> {
   final List<String> _categories = ["General", "Electronics", "Clothing", "Groceries", "Dining", "Others"];
 
   final DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
+
+  // --- IAP VARIABLES ---
+  final InAppPurchase _inAppPurchase = InAppPurchase.instance;
+  final String _productId = 'next_scan_299';
 
   Future<void> _syncToCalendar({
     required String storeName,
@@ -109,6 +116,46 @@ class _OcrScreenState extends State<OcrScreen> {
     return permanentFile.path;
   }
 
+  // --- IAP LOGIC: Payment Dialog ---
+  void _showPaymentDialog(ImageSource source) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text("Scan Limit Reached", style: TextStyle(color: Colors.blue)),
+        content: const Text("You can have one active receipt for free. Pay \$2.99 to add more or delete the existing one.", style: TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+            onPressed: () {
+              Navigator.pop(context);
+              _initiatePurchase(source);
+            },
+            child: const Text("Pay \$2.99", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- IAP LOGIC: Handle Purchase ---
+  Future<void> _initiatePurchase(ImageSource source) async {
+    final bool available = await _inAppPurchase.isAvailable();
+    if (!available) return;
+
+    const Set<String> _kIds = <String>{'next_scan_299'};
+    final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(_kIds);
+
+    if (response.productDetails.isNotEmpty) {
+      final PurchaseParam purchaseParam = PurchaseParam(productDetails: response.productDetails.first);
+      _inAppPurchase.buyConsumable(purchaseParam: purchaseParam);
+
+      // Note: In real app, listen to purchaseStream. For now, we proceed to scan.
+      _pickImage(source);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -124,9 +171,16 @@ class _OcrScreenState extends State<OcrScreen> {
       if (widget.existingReceipt!.imagePath.isNotEmpty) {
         _pickedImage = File(widget.existingReceipt!.imagePath);
       }
-    } else {  //line 97 remeber where to cut if put back right there till line 101
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _pickImage(ImageSource.camera);
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        // LIVE CHECK: Agar list khali hai to foran camera kholo
+        final List<Map<String, dynamic>> receipts = await DatabaseService().getReceipts();
+
+        if (receipts.isEmpty) {
+          _pickImage(ImageSource.camera);
+        } else {
+          _showPaymentDialog(ImageSource.camera);
+        }
       });
     }
   }
@@ -138,6 +192,23 @@ class _OcrScreenState extends State<OcrScreen> {
     _notesController.dispose();
     super.dispose();
   }
+
+  // --- WRAPPER FOR SCAN BUTTONS ---
+  Future<void> _handleScanAction(ImageSource source) async {
+    if (widget.existingReceipt != null) {
+      _pickImage(source);
+      return;
+    }
+
+    // LIVE CHECK: Har baar button dabane par database check hoga
+    final List<Map<String, dynamic>> receipts = await DatabaseService().getReceipts();
+    if (receipts.isEmpty) {
+      _pickImage(source);
+    } else {
+      _showPaymentDialog(source);
+    }
+  }
+
   Future<void> _pickImage(ImageSource source) async {
     try {
       XFile? image;
@@ -148,13 +219,11 @@ class _OcrScreenState extends State<OcrScreen> {
           MaterialPageRoute(builder: (_) => const CameraCaptureScreen()),
         );
       } else {
-        // High quality setting preserved
         image = await _picker.pickImage(source: source, imageQuality: 90);
       }
 
       if (image == null) {
         if (widget.existingReceipt == null && mounted) {
-          // --- CHANGE HERE: Back to Onboarding if image canceled ---
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (context) => const OnboardingScreen()),
@@ -229,7 +298,7 @@ class _OcrScreenState extends State<OcrScreen> {
       setState(() {
         _pickedImage = File(image!.path);
         _extractedText = "Reading receipt...";
-        _isDateManuallySet = false; // Reset on new scan
+        _isDateManuallySet = false;
       });
 
       _readTextFromImage();
@@ -238,10 +307,8 @@ class _OcrScreenState extends State<OcrScreen> {
     }
   }
 
-  // Helper for Exact Date Parsing
   DateTime? _parseExactDate(String input) {
     try {
-      // Standardize separators
       String clean = input.replaceAll(RegExp(r'[^0-9]'), '/');
       List<String> parts = clean.split('/').where((s) => s.isNotEmpty).toList();
 
@@ -279,7 +346,6 @@ class _OcrScreenState extends State<OcrScreen> {
         if (match != null) {
           DateTime? parsed = _parseExactDate(match.group(0)!);
           if (parsed != null) {
-            // --- ENHANCED SCAN: More keywords for deadline ---
             if (upperLine.contains("DUE") ||
                 upperLine.contains("EXP") ||
                 upperLine.contains("UNTIL") ||
@@ -309,7 +375,6 @@ class _OcrScreenState extends State<OcrScreen> {
             if (detectedDeadline != null) {
               _selectedDate = detectedDeadline;
             } else {
-              // If no clear deadline found, stick to 30 days but don't "force" it if user is typing
               _selectedDate = _purchaseDate.add(const Duration(days: 30));
             }
           }
@@ -371,13 +436,13 @@ class _OcrScreenState extends State<OcrScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     ElevatedButton.icon(
-                      onPressed: () => _pickImage(ImageSource.gallery),
+                      onPressed: () => _handleScanAction(ImageSource.gallery),
                       icon: const Icon(Icons.photo),
                       label: const Text("Gallery"),
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
                     ),
                     ElevatedButton.icon(
-                      onPressed: () => _pickImage(ImageSource.camera),
+                      onPressed: () => _handleScanAction(ImageSource.camera),
                       icon: const Icon(Icons.camera_alt),
                       label: const Text("Camera"),
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
@@ -448,7 +513,6 @@ class _OcrScreenState extends State<OcrScreen> {
                 ),
                 const SizedBox(height: 10),
                 ListTile(
-                  // --- VISUAL FIX: Use bold color for manual dates ---
                   title: Text(
                     "Deadline: ${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}",
                     style: TextStyle(color: _isDateManuallySet ? Colors.greenAccent : Colors.white),
@@ -467,10 +531,9 @@ class _OcrScreenState extends State<OcrScreen> {
                       builder: (context, child) => Theme(data: ThemeData.dark().copyWith(colorScheme: const ColorScheme.dark(primary: Colors.blue)), child: child!),
                     );
 
-                    // Line 396 updated:
                     if (pickedDate != null && mounted) {
                       setState(() {
-                        _selectedDate = pickedDate; // No time picker here anymore
+                        _selectedDate = pickedDate;
                         _isDateManuallySet = true;
                       });
                     }
@@ -503,7 +566,6 @@ class _OcrScreenState extends State<OcrScreen> {
                       return;
                     }
 
-                    // --- MANUAL TIME PICKER ---
                     TimeOfDay? pickedTime = await showTimePicker(
                       context: context,
                       initialTime: TimeOfDay.fromDateTime(_selectedDate),
@@ -551,8 +613,6 @@ class _OcrScreenState extends State<OcrScreen> {
                       deadline: receipt.refundDeadline,
                     );
 
-                    // --- UPDATED NOTIFICATION LOGIC ---
-                    // This calls the smart reminders (1 Day and 1 Hour) synchronized in NotificationService
                     await NotificationService().scheduleSmartReminders(
                       receiptId: receipt.id.hashCode.abs(),
                       storeName: receipt.storeName,
@@ -565,7 +625,6 @@ class _OcrScreenState extends State<OcrScreen> {
                         const SnackBar(content: Text("Receipt Saved & Smart Reminder Set!"), backgroundColor: Colors.blue),
                       );
 
-                      // --- UPDATED NAVIGATION: Go directly to ReceiptDetailScreen using toMap() ---
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(

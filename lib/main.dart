@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import 'dart:io'; // Added for exit(0)
 import 'package:flutter/services.dart'; // Added for SystemNavigator
-import 'screens/home_screen.dart';
 import 'services/notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/onboarding_screen.dart';
-import 'screens/main_wrapper.dart';
 import 'services/database_service.dart'; // Added for rescheduling logic
 import 'package:flutter_local_notifications/flutter_local_notifications.dart'; // Added for permission check
 import 'screens/receipt_detail_screen.dart'; // Required for navigation
-import 'package:timezone/timezone.dart' as tz; // Added for timezone support
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'screens/refund_list_screen.dart';
