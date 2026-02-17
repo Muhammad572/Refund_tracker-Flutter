@@ -13,7 +13,6 @@ class SubscriptionScreen extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.grey[900],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         title: Text(title, style: const TextStyle(color: Colors.blue)),
         content: SizedBox(
           width: double.maxFinite,
