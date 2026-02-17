@@ -625,15 +625,20 @@ class _OcrScreenState extends State<OcrScreen> {
                         const SnackBar(content: Text("Receipt Saved & Smart Reminder Set!"), backgroundColor: Colors.blue),
                       );
 
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ReceiptDetailScreen(receipt: receipt.toMap()),
-                        ),
-                      );
+                      // FIX: Yahan navigation change ki hai taake double screen issue khatam ho jaye
+                      if(widget.existingReceipt != null) {
+                        Navigator.of(context).popUntil((route) => route.isFirst);
+                      } else {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ReceiptDetailScreen(receipt: receipt.toMap()),
+                          ),
+                        );
+                      }
                     }
                   },
-                  child: Text(widget.existingReceipt == null ? "SAVE RECEIPT & SET REMINDER" : "UPDATE RECEIPT"),
+                  child: Text(widget.existingReceipt == null ? "SAVE RECEIPT & SET REMINDER" : "UPDATE AND SET REMINDER"),
                 ),
                 TextButton(
                   onPressed: () {
