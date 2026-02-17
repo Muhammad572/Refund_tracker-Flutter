@@ -14,6 +14,7 @@ import '../services/notification_service.dart';
 import '../services/ocr_service.dart';
 import 'onboarding_screen.dart'; // Added import to allow navigation back
 import 'receipt_detail_screen.dart'; // Added for direct navigation
+import 'refund_list_screen.dart'; // Added to ensure correct navigation after update
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
@@ -625,10 +626,16 @@ class _OcrScreenState extends State<OcrScreen> {
                         const SnackBar(content: Text("Receipt Saved & Smart Reminder Set!"), backgroundColor: Colors.blue),
                       );
 
-                      // FIX: Yahan navigation change ki hai taake double screen issue khatam ho jaye
+                      // --- FIXED NAVIGATION AFTER UPDATE ---
                       if(widget.existingReceipt != null) {
-                        Navigator.of(context).popUntil((route) => route.isFirst);
+                        // Jab edit ho raha ho, to update ke baad seedha list par jao
+                        Navigator.pushAndRemoveUntil(
+                          context,
+                          MaterialPageRoute(builder: (context) => const RefundListScreen()),
+                              (route) => false,
+                        );
                       } else {
+                        // Jab naya scan ho raha ho, to detail screen par jao
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
