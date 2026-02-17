@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  url_launcher: ^6.3.2  # Ye line add karein
   image_picker: ^1.0.7
   google_mlkit_text_recognition: ^0.14.0
   sqflite: ^2.3.0

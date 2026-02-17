@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async'; // Added for StreamSubscription
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart'; // Added for Step 7
 import 'package:path/path.dart' as p; // Added for Step 7
 import 'package:in_app_purchase/in_app_purchase.dart'; // Added for IAP
 import 'package:shared_preferences/shared_preferences.dart'; // Added for Free Trial check
+import 'package:url_launcher/url_launcher.dart'; // Added for Privacy Link
 import '../services/database_service.dart';
 import '../models/receipt_model.dart';
 import '../services/notification_service.dart';
@@ -18,6 +20,7 @@ import 'refund_list_screen.dart'; // Added to ensure correct navigation after up
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
+import 'subscription_screen.dart';
 
 class OcrScreen extends StatefulWidget {
   final Receipt? existingReceipt;
@@ -55,6 +58,10 @@ class _OcrScreenState extends State<OcrScreen> {
   // --- IAP VARIABLES ---
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
   final String _productId = 'next_scan_299';
+  late StreamSubscription<List<PurchaseDetails>> _subscription; // Listener for payments
+
+  // --- DEMO LINK VARIABLE ---
+  final String _demoPolicyUrl = "https://sites.google.com/view/refundtracker-privacy";
 
   Future<void> _syncToCalendar({
     required String storeName,
@@ -123,17 +130,30 @@ class _OcrScreenState extends State<OcrScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.grey[900],
-        title: const Text("Scan Limit Reached", style: TextStyle(color: Colors.blue)),
-        content: const Text("You can have one active receipt for free. Pay \$2.99 to add more or delete the existing one.", style: TextStyle(color: Colors.white)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text("Scan Limit Reached", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+        content: const Text(
+          "You can have one active receipt for free. Please view our plans to unlock unlimited scans.",
+          style: TextStyle(color: Colors.white),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel", style: TextStyle(color: Colors.grey))),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+            ),
             onPressed: () {
               Navigator.pop(context);
-              _initiatePurchase(source);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SubscriptionScreen()),
+              );
             },
-            child: const Text("Pay \$2.99", style: TextStyle(color: Colors.white)),
+            child: const Text("View Plans", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -151,15 +171,40 @@ class _OcrScreenState extends State<OcrScreen> {
     if (response.productDetails.isNotEmpty) {
       final PurchaseParam purchaseParam = PurchaseParam(productDetails: response.productDetails.first);
       _inAppPurchase.buyConsumable(purchaseParam: purchaseParam);
+    }
+  }
 
-      // Note: In real app, listen to purchaseStream. For now, we proceed to scan.
-      _pickImage(source);
+  // --- IAP LOGIC: Listen for success ---
+  void _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList, ImageSource source) {
+    for (var purchaseDetails in purchaseDetailsList) {
+      if (purchaseDetails.status == PurchaseStatus.purchased ||
+          purchaseDetails.status == PurchaseStatus.restored) {
+        // Complete the transaction
+        if (purchaseDetails.pendingCompletePurchase) {
+          _inAppPurchase.completePurchase(purchaseDetails);
+        }
+        // Success! Now open the scanner
+        _pickImage(source);
+      } else if (purchaseDetails.status == PurchaseStatus.error) {
+        debugPrint("Purchase Error: ${purchaseDetails.error}");
+      }
     }
   }
 
   @override
   void initState() {
     super.initState();
+
+    // Initialize IAP listener
+    final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
+    _subscription = purchaseUpdated.listen((purchaseDetailsList) {
+      _listenToPurchaseUpdated(purchaseDetailsList, ImageSource.camera);
+    }, onDone: () {
+      _subscription.cancel();
+    }, onError: (error) {
+      debugPrint("IAP Stream Error: $error");
+    });
+
     if (widget.existingReceipt != null) {
       _storeController.text = widget.existingReceipt!.storeName;
       _amountController.text = widget.existingReceipt!.amount.toString();
@@ -191,6 +236,7 @@ class _OcrScreenState extends State<OcrScreen> {
     _storeController.dispose();
     _amountController.dispose();
     _notesController.dispose();
+    _subscription.cancel(); // Stop listening for payments
     super.dispose();
   }
 
