@@ -9,7 +9,7 @@ import 'package:path_provider/path_provider.dart'; // Added for Step 7
 import 'package:path/path.dart' as p; // Added for Step 7
 import 'package:in_app_purchase/in_app_purchase.dart'; // Added for IAP
 import 'package:shared_preferences/shared_preferences.dart'; // Added for Free Trial check
-import 'package:url_launcher/url_launcher.dart'; // Added for Privacy Link
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import '../services/database_service.dart';
 import '../models/receipt_model.dart';
 import '../services/notification_service.dart';
@@ -18,9 +18,13 @@ import 'onboarding_screen.dart'; // Added import to allow navigation back
 import 'receipt_detail_screen.dart'; // Added for direct navigation
 import 'refund_list_screen.dart'; // Added to ensure correct navigation after update
 import 'package:timezone/timezone.dart' as tz;
-import 'package:timezone/timezone.dart' as tz;
-import 'package:timezone/data/latest.dart' as tz;
 import 'subscription_screen.dart';
+
+class ParsedValue<T> {
+  final T value;
+  final double confidence;
+  ParsedValue({required this.value, required this.confidence});
+}
 
 class OcrScreen extends StatefulWidget {
   final Receipt? existingReceipt;
@@ -34,8 +38,10 @@ class _OcrScreenState extends State<OcrScreen> {
   File? _pickedImage;
 
   String _extractedText = "Scan a receipt to begin";
+  bool _isDisposed = false;
+  bool _hasOpenedCamera = false;
 
-  DateTime? _lastPressedAt;
+  // DateTime? _lastPressedAt;
   final TextEditingController _storeController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
@@ -57,11 +63,7 @@ class _OcrScreenState extends State<OcrScreen> {
 
   // --- IAP VARIABLES ---
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
-  final String _productId = 'next_scan_299';
-  late StreamSubscription<List<PurchaseDetails>> _subscription; // Listener for payments
 
-  // --- DEMO LINK VARIABLE ---
-  final String _demoPolicyUrl = "https://sites.google.com/view/refundtracker-privacy";
 
   Future<void> _syncToCalendar({
     required String storeName,
@@ -174,80 +176,132 @@ class _OcrScreenState extends State<OcrScreen> {
     }
   }
 
-  // --- IAP LOGIC: Listen for success ---
   void _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList, ImageSource source) {
     for (var purchaseDetails in purchaseDetailsList) {
       if (purchaseDetails.status == PurchaseStatus.purchased ||
           purchaseDetails.status == PurchaseStatus.restored) {
-        // Complete the transaction
+
         if (purchaseDetails.pendingCompletePurchase) {
           _inAppPurchase.completePurchase(purchaseDetails);
         }
-        // Success! Now open the scanner
-        _pickImage(source);
+
+        ProStatus.isPro = true;
+
+        // Small delay to prevent camera hardware race condition
+        if (mounted) {
+            if (mounted) _pickImage(source);
+        }
       } else if (purchaseDetails.status == PurchaseStatus.error) {
         debugPrint("Purchase Error: ${purchaseDetails.error}");
       }
     }
   }
 
+
+
   @override
   void initState() {
     super.initState();
 
-    // Initialize IAP listener
-    final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
-    _subscription = purchaseUpdated.listen((purchaseDetailsList) {
-      _listenToPurchaseUpdated(purchaseDetailsList, ImageSource.camera);
-    }, onDone: () {
-      _subscription.cancel();
-    }, onError: (error) {
-      debugPrint("IAP Stream Error: $error");
-    });
+    // _subscription = _inAppPurchase.purchaseStream.listen((purchases) {
+    //   // 1. HARD GUARD: Only act if not disposed AND not already initialized
+    //   if (!_isDisposed && mounted && !_hasOpenedCamera) {
+    //     _listenToPurchaseUpdated(purchases, ImageSource.camera);
+    //   }
+    // });
 
-    if (widget.existingReceipt != null) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // 2. HARD GUARD: Check disposal after the frame is rendered
+      if (_isDisposed || !mounted || _hasOpenedCamera) return;
+
+      final prefs = await SharedPreferences.getInstance();
+
+      // 3. RE-CHECK: Disposal can happen during the async 'await' above
+      if (_isDisposed || !mounted) return;
+
+      ProStatus.isPro = prefs.getBool("isProUser") ?? false;
+
+      if (widget.existingReceipt != null) {
+        _hasOpenedCamera = true;
+        _loadExistingReceipt();
+      } else {
+        final receipts = await DatabaseService().getReceipts();
+
+        // 4. RE-CHECK: Database call is async
+        if (_isDisposed || !mounted) return;
+
+        if (!_hasOpenedCamera) {
+          if (ProStatus.isPro || receipts.isEmpty) {
+            _hasOpenedCamera = true;
+            _pickImage(ImageSource.camera);
+          } else {
+            _showPaymentDialog(ImageSource.camera);
+          }
+        }
+      }
+    });
+  }
+
+  // Add this method to handle loading data when editing an existing receipt
+  void _loadExistingReceipt() {
+    setState(() {
       _storeController.text = widget.existingReceipt!.storeName;
       _amountController.text = widget.existingReceipt!.amount.toString();
       _selectedDate = widget.existingReceipt!.refundDeadline;
       _purchaseDate = widget.existingReceipt!.purchaseDate;
       _notesController.text = widget.existingReceipt!.notes ?? "";
       _extractedText = widget.existingReceipt!.fullText;
-      _selectedCategory = widget.existingReceipt!.category; // Load Category
-      _isDateManuallySet = true;
+      _selectedCategory = widget.existingReceipt!.category;
+      _isDateManuallySet = true; // Since it's existing, we treat it as set
       if (widget.existingReceipt!.imagePath.isNotEmpty) {
         _pickedImage = File(widget.existingReceipt!.imagePath);
       }
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        // LIVE CHECK: Agar list khali hai to foran camera kholo
-        final List<Map<String, dynamic>> receipts = await DatabaseService().getReceipts();
+    });
+  }
 
-        if (receipts.isEmpty) {
-          _pickImage(ImageSource.camera);
-        } else {
-          _showPaymentDialog(ImageSource.camera);
-        }
-      });
+  // inside OcrScreen class
+
+  Future<void> _checkLimitAndOpenScanner() async {
+    final List<Map<String, dynamic>> receipts = await DatabaseService().getReceipts();
+
+    // LIVE RE-VERIFY: Check storage for immediate purchase updates
+    final prefs = await SharedPreferences.getInstance();
+    final isProUser = prefs.getBool("isProUser") ?? false;
+    ProStatus.isPro = isProUser;
+
+    if (isProUser || receipts.length < 1) {
+      _pickImage(ImageSource.camera);
+    } else {
+      _showPaymentDialog(ImageSource.camera);
     }
   }
+
   @override
   void dispose() {
-    _ocrService.dispose();
+    _isDisposed = true; // Mark as dead first
+
     _storeController.dispose();
     _amountController.dispose();
     _notesController.dispose();
-    _subscription.cancel(); // Stop listening for payments
+    _ocrService.dispose();
+
     super.dispose();
   }
 
-  // --- WRAPPER FOR SCAN BUTTONS ---
   Future<void> _handleScanAction(ImageSource source) async {
+    // 1. If editing, always allow
     if (widget.existingReceipt != null) {
       _pickImage(source);
       return;
     }
 
-    // LIVE CHECK: Har baar button dabane par database check hoga
+    // 2. CHECK GLOBAL VARIABLE FIRST (Instant)
+    if (ProStatus.isPro) {
+      _pickImage(source);
+      return;
+    }
+
+    // 3. Fallback to Database check for free users
     final List<Map<String, dynamic>> receipts = await DatabaseService().getReceipts();
     if (receipts.isEmpty) {
       _pickImage(source);
@@ -257,6 +311,9 @@ class _OcrScreenState extends State<OcrScreen> {
   }
 
   Future<void> _pickImage(ImageSource source) async {
+    if (!mounted) return;
+    if (!ModalRoute.of(context)!.isCurrent) return;
+    if (_isDisposed) return;
     try {
       XFile? image;
 
@@ -354,81 +411,176 @@ class _OcrScreenState extends State<OcrScreen> {
     }
   }
 
+  // DateTime? _parseExactDate(String input) {
+  //   try {
+  //     String clean = input.replaceAll(RegExp(r'[^0-9]'), '/');
+  //     List<String> parts = clean.split('/').where((s) => s.isNotEmpty).toList();
+  //
+  //     if (parts.length >= 3) {
+  //       int d = int.parse(parts[0]);
+  //       int m = int.parse(parts[1]);
+  //       int y = int.parse(parts[2]);
+  //       if (y < 100) y += 2000;
+  //       if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+  //         return DateTime(y, m, d);
+  //       }
+  //     }
+  //   } catch (_) {}
+  //   return null;
+  // }
+
   DateTime? _parseExactDate(String input) {
     try {
-      String clean = input.replaceAll(RegExp(r'[^0-9]'), '/');
-      List<String> parts = clean.split('/').where((s) => s.isNotEmpty).toList();
+      // Standardize separators to '/'
+      String clean = input.replaceAll(RegExp(r'[.\-\s]'), '/');
+
+      // Extract numbers only
+      List<String> parts = clean.split('/').where((s) => RegExp(r'^\d+$').hasMatch(s)).toList();
 
       if (parts.length >= 3) {
-        int d = int.parse(parts[0]);
-        int m = int.parse(parts[1]);
-        int y = int.parse(parts[2]);
-        if (y < 100) y += 2000;
-        if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-          return DateTime(y, m, d);
-        }
+        int day = int.parse(parts[0]);
+        int month = int.parse(parts[1]);
+        int year = int.parse(parts[2]);
+
+        // Handle 2-digit years (24 -> 2024)
+        if (year < 100) year += 2000;
+
+        // Validate date ranges to prevent "31/31/2024" errors
+        if (month < 1 || month > 12) return null;
+        if (day < 1 || day > 31) return null;
+
+        return DateTime(year, month, day);
       }
     } catch (_) {}
     return null;
   }
 
+  // Future<void> _readTextFromImage() async {
+  //   if (_pickedImage == null || !mounted) return;
+  //
+  //   setState(() => _isOcrRunning = true);
+  //
+  //   try {
+  //     final inputImage = InputImage.fromFile(_pickedImage!);
+  //     // Heavy processing starts here
+  //     final result = await _ocrService.parseReceipt(inputImage);
+  //
+  //     // GUARD: Check if user left during OCR
+  //     if (!mounted) return;
+  //
+  //     String fullText = result['fullText'];
+  //     DateTime purchaseDate = DateTime.now();
+  //     DateTime selectedDate = purchaseDate.add(const Duration(days: 30));
+  //
+  //     RegExp datePattern = RegExp(r"(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})");
+  //     List<String> lines = fullText.split('\n');
+  //
+  //     for (var line in lines) {
+  //       String upperLine = line.toUpperCase();
+  //       var match = datePattern.firstMatch(line.replaceAll(' ', ''));
+  //       if (match != null) {
+  //         DateTime? parsed = _parseExactDate(match.group(0)!);
+  //         if (parsed != null) {
+  //           if (upperLine.contains("DUE") || upperLine.contains("EXP") ||
+  //               upperLine.contains("RETURN BY") || upperLine.contains("DEADLINE")) {
+  //             selectedDate = parsed;
+  //           } else {
+  //             purchaseDate = parsed;
+  //           }
+  //         }
+  //       }
+  //     }
+  //
+  //     // FINAL GUARD: Update UI only if still mounted
+  //     setState(() {
+  //       _isOcrRunning = false;
+  //       _storeController.text = result['merchant'];
+  //       _amountController.text = result['amount'] > 0 ? result['amount'].toStringAsFixed(2) : "";
+  //       _extractedText = fullText;
+  //       _purchaseDate = purchaseDate;
+  //       if (!_isDateManuallySet) {
+  //         _selectedDate = selectedDate;
+  //       }
+  //     });
+  //   } catch (e) {
+  //     debugPrint("OCR Error: $e");
+  //     if (mounted) {
+  //       setState(() {
+  //         _extractedText = "Error reading receipt";
+  //         _isOcrRunning = false;
+  //       });
+  //     }
+  //   }
+  // }
+
   Future<void> _readTextFromImage() async {
-    if (_pickedImage == null) return;
+    if (_pickedImage == null || !mounted) return;
     setState(() => _isOcrRunning = true);
+
     try {
       final inputImage = InputImage.fromFile(_pickedImage!);
       final result = await _ocrService.parseReceipt(inputImage);
+      if (!mounted) return;
+
       String fullText = result['fullText'];
+      List<String> lines = fullText.split('\n');
 
       DateTime? detectedPurchaseDate;
       DateTime? detectedDeadline;
 
-      RegExp datePattern = RegExp(r"(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})");
+      // Improved Regex: Handles spaces like "12 / 05 / 2024"
+      RegExp datePattern = RegExp(r"(\d{1,2}[\s/\-.]+\d{1,2}[\s/\-.]+\d{2,4})");
 
-      List<String> lines = fullText.split('\n');
+      // Keywords to look for
+      List<String> deadlineKeywords = ["RETURN", "DUE", "EXP", "VALID", "UNTIL", "BEFORE", "DEADLINE"];
+      List<String> purchaseKeywords = ["DATE", "SALE", "TRANS", "TIME", "ISSUED"];
+
       for (var line in lines) {
         String upperLine = line.toUpperCase();
-        var match = datePattern.firstMatch(line.replaceAll(' ', ''));
+        var match = datePattern.firstMatch(line);
 
         if (match != null) {
           DateTime? parsed = _parseExactDate(match.group(0)!);
           if (parsed != null) {
-            if (upperLine.contains("DUE") ||
-                upperLine.contains("EXP") ||
-                upperLine.contains("UNTIL") ||
-                upperLine.contains("BEFORE") ||
-                upperLine.contains("DEADLINE") ||
-                upperLine.contains("RETURN BY")) {
+            // Check if this specific line contains deadline intent
+            bool isDeadlineLine = deadlineKeywords.any((k) => upperLine.contains(k));
+            bool isPurchaseLine = purchaseKeywords.any((k) => upperLine.contains(k));
+
+            if (isDeadlineLine) {
               detectedDeadline = parsed;
+            } else if (isPurchaseLine && detectedPurchaseDate == null) {
+              detectedPurchaseDate = parsed;
             } else if (detectedPurchaseDate == null) {
+              // Fallback: first generic date found is usually the purchase date
               detectedPurchaseDate = parsed;
             }
           }
         }
       }
 
-      if (mounted) {
-        setState(() {
-          _isOcrRunning = false;
-          _storeController.text = result['merchant'];
-          _amountController.text = result['amount'] > 0 ? result['amount'].toStringAsFixed(2) : "";
-          _extractedText = fullText;
+      setState(() {
+        _isOcrRunning = false;
+        _storeController.text = result['merchant'];
+        _amountController.text = result['amount'] > 0 ? result['amount'].toStringAsFixed(2) : "";
+        _extractedText = fullText;
 
-          if (detectedPurchaseDate != null) {
-            _purchaseDate = detectedPurchaseDate;
-          }
+        // Logic: If we found a purchase date but no deadline, default to +30 days
+        if (detectedPurchaseDate != null) {
+          _purchaseDate = detectedPurchaseDate;
+        }
 
-          if (!_isDateManuallySet) {
-            if (detectedDeadline != null) {
-              _selectedDate = detectedDeadline;
-            } else {
-              _selectedDate = _purchaseDate.add(const Duration(days: 30));
-            }
+        if (!_isDateManuallySet) {
+          if (detectedDeadline != null) {
+            _selectedDate = detectedDeadline;
+          } else {
+            // Auto-calculate 30 days from detected purchase date
+            _selectedDate = _purchaseDate.add(const Duration(days: 30));
           }
-        });
-      }
+        }
+      });
     } catch (e) {
-      if (mounted) setState(() { _extractedText = "Error: $e"; _isOcrRunning = false; });
+      debugPrint("OCR Error: $e");
+      if (mounted) setState(() => _isOcrRunning = false);
     }
   }
 
@@ -613,80 +765,88 @@ class _OcrScreenState extends State<OcrScreen> {
                       return;
                     }
 
+                    // --- RESTORED TIME PICKER ---
+                    // This allows the user to set the exact time for the notification
                     TimeOfDay? pickedTime = await showTimePicker(
                       context: context,
                       initialTime: TimeOfDay.fromDateTime(_selectedDate),
                       builder: (context, child) => Theme(
-                        data: ThemeData.dark().copyWith(colorScheme: const ColorScheme.dark(primary: Colors.blue)),
+                        data: ThemeData.dark().copyWith(
+                          colorScheme: const ColorScheme.dark(primary: Colors.blue),
+                        ),
                         child: child!,
                       ),
                     );
 
-                    if (pickedTime != null) {
-                      setState(() {
-                        _selectedDate = DateTime(
-                          _selectedDate.year,
-                          _selectedDate.month,
-                          _selectedDate.day,
-                          pickedTime.hour,
-                          pickedTime.minute,
-                        );
-                      });
-                    } else {
-                      return;
-                    }
+                    // If user cancels the time picker, we stop the save process
+                    if (pickedTime == null) return;
 
+                    // Update the deadline with the selected time
+                    setState(() {
+                      _selectedDate = DateTime(
+                        _selectedDate.year,
+                        _selectedDate.month,
+                        _selectedDate.day,
+                        pickedTime.hour,
+                        pickedTime.minute,
+                      );
+                    });
+
+                    // 1. Image logic
                     String finalImagePath = _pickedImage?.path ?? "";
                     if (_pickedImage != null && widget.existingReceipt == null) {
                       finalImagePath = await _saveImagePermanently(_pickedImage!.path);
                     }
 
+                    // 2. Create the receipt object
                     final receipt = Receipt(
                       id: widget.existingReceipt?.id ?? DateTime.now().toString(),
                       storeName: _storeController.text,
                       amount: double.tryParse(_amountController.text) ?? 0.0,
                       purchaseDate: _purchaseDate,
-                      refundDeadline: _selectedDate,
+                      refundDeadline: _selectedDate, // Now contains the picked time
                       imagePath: finalImagePath,
                       fullText: _extractedText,
                       notes: _notesController.text,
                       category: _selectedCategory,
                     );
 
+                    // 3. Database operation
                     await DatabaseService().insertReceipt(receipt.toMap());
-                    await _syncToCalendar(
-                      storeName: receipt.storeName,
-                      amount: receipt.amount,
-                      deadline: receipt.refundDeadline,
-                    );
 
-                    await NotificationService().scheduleSmartReminders(
-                      receiptId: receipt.id.hashCode.abs(),
-                      storeName: receipt.storeName,
-                      amount: receipt.amount,
-                      deadline: receipt.refundDeadline,
-                    );
-
+                    // 4. Calendar & Notifications
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Receipt Saved & Smart Reminder Set!"), backgroundColor: Colors.blue),
+                      await _syncToCalendar(
+                        storeName: receipt.storeName,
+                        amount: receipt.amount,
+                        deadline: receipt.refundDeadline,
                       );
 
-                      // --- FIXED NAVIGATION AFTER UPDATE ---
-                      if(widget.existingReceipt != null) {
-                        // Jab edit ho raha ho, to update ke baad seedha list par jao
-                        Navigator.pushAndRemoveUntil(
-                          context,
-                          MaterialPageRoute(builder: (context) => const RefundListScreen()),
-                              (route) => false,
-                        );
-                      } else {
-                        // Jab naya scan ho raha ho, to detail screen par jao
+                      if (!mounted) return;
+
+                      await NotificationService().scheduleSmartReminders(
+                        receiptId: receipt.id.hashCode.abs(),
+                        storeName: receipt.storeName,
+                        amount: receipt.amount,
+                        deadline: receipt.refundDeadline,
+                      );
+                    }
+
+                    // 5. Final Navigation
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Receipt Saved & Reminder Set!"), backgroundColor: Colors.blue),
+                      );
+
+                      if (widget.existingReceipt != null) {
                         Navigator.pushReplacement(
                           context,
-                          MaterialPageRoute(
-                            builder: (context) => ReceiptDetailScreen(receipt: receipt.toMap()),
-                          ),
+                          MaterialPageRoute(builder: (context) => const RefundListScreen()),
+                        );
+                      } else {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(builder: (context) => ReceiptDetailScreen(receipt: receipt.toMap())),
                         );
                       }
                     }
@@ -721,18 +881,51 @@ class CameraCaptureScreen extends StatefulWidget {
 
 class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
   CameraController? controller;
-
+  bool _isCapturing = false;
   @override
   void initState() {
     super.initState();
     initCamera();
   }
 
+  @override
+  void dispose() {
+    // This shuts down the camera hardware and turns off the light
+    controller?.dispose();
+    super.dispose();
+  }
+
   Future<void> initCamera() async {
-    final cameras = await availableCameras();
-    controller = CameraController(cameras.first, ResolutionPreset.high);
-    await controller!.initialize();
-    if (mounted) setState(() {});
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) return;
+
+      // Create a local temporary controller first
+      final CameraController tempController = CameraController(
+        cameras.first,
+        ResolutionPreset.high,
+        enableAudio: false, // Setting to false prevents many background crashes
+      );
+
+      // Safety Check: If user left the screen while getting cameras
+      if (!mounted) return;
+
+      await tempController.initialize();
+
+      // Safety Check: If user left the screen while initializing
+      if (!mounted) {
+        await tempController.dispose();
+        return;
+      }
+
+      setState(() {
+        controller = tempController;
+      });
+    } catch (e) {
+      debugPrint("Camera Initialization Error: $e");
+      // Handle specific error: if it fails, pop back so the app doesn't freeze
+      if (mounted) Navigator.pop(context);
+    }
   }
 
   @override
@@ -767,8 +960,17 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
               child: FloatingActionButton(
                 backgroundColor: Colors.blue,
                 onPressed: () async {
-                  final file = await controller!.takePicture();
-                  if (mounted) Navigator.pop(context, XFile(file.path));
+                  if (_isCapturing) return; // Ignore if already taking a photo
+
+                  setState(() => _isCapturing = true);
+                  try {
+                    final file = await controller!.takePicture();
+                    if (mounted) Navigator.pop(context, XFile(file.path));
+                  } catch (e) {
+                    debugPrint("Capture Error: $e");
+                  } finally {
+                    if (mounted) setState(() => _isCapturing = false);
+                  }
                 },
                 child: const Icon(Icons.camera_alt, color: Colors.white),
               ),

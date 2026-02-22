@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:io'; // Added for exit(0)
+import 'dart:async';
 import 'package:flutter/services.dart'; // Added for SystemNavigator
+import 'package:refund_tracker/screens/main_tabs_screen.dart';
 import 'services/notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/onboarding_screen.dart';
@@ -10,6 +12,8 @@ import 'screens/receipt_detail_screen.dart'; // Required for navigation
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'screens/refund_list_screen.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
+import '../models/receipt_model.dart';
 // --- 9.2: GLOBAL NAVIGATOR KEY ---
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -19,14 +23,137 @@ DateTime? _lastPressedAt;
 // ADDED: This tracks if we should show detail screen directly
 Map<String, dynamic>? notificationReceipt;
 
+bool _isProChecking = false; // Add this global variable
+
+// Future<void> checkProStatus() async {
+//   if (_isProChecking) return;
+//   _isProChecking = true;
+//
+//   final iap = InAppPurchase.instance;
+//   final prefs = await SharedPreferences.getInstance();
+//
+//   if (!await iap.isAvailable()) {
+//     _isProChecking = false;
+//     return;
+//   }
+//
+//   // Initial Sync from local storage
+//   ProStatus.isPro = prefs.getBool("isProUser") ?? false;
+//   debugPrint("✅ ProStatus.isPro = ${ProStatus.isPro}");
+//   iap.purchaseStream.listen((purchases) async {
+//     // 1. Check if ANY valid purchase exists in the returned list
+//     bool foundActiveSub = purchases.any((purchase) =>
+//     (purchase.status == PurchaseStatus.purchased || purchase.status == PurchaseStatus.restored) &&
+//         (purchase.productID == "pro_monthly" || purchase.productID == "pro_yearly" || purchase.productID == "refund_tracker_pro"));
+//
+//     // 2. Update status based on the store result
+//     if (foundActiveSub) {
+//       if (!ProStatus.isPro) {
+//         await prefs.setBool("isProUser", true);
+//         ProStatus.isPro = true;
+//         debugPrint("Pro Status: Active ✅");
+//       }
+//     } else {
+//       // If we checked the store and found NOTHING, set to false
+//       if (ProStatus.isPro) {
+//         await prefs.setBool("isProUser", false);
+//         ProStatus.isPro = false;
+//         debugPrint("Pro Status: Expired/None found ❌");
+//       }
+//     }
+//
+//     for (final purchase in purchases) {
+//       if (purchase.pendingCompletePurchase) {
+//         await iap.completePurchase(purchase);
+//       }
+//     }
+//   });
+//
+//   try {
+//     await iap.restorePurchases();
+//   } catch (_) {
+//     _isProChecking = false;
+//   }
+// }
+
+Future<void> checkProStatus() async {
+  if (_isProChecking) return;
+  _isProChecking = true;
+
+  final iap = InAppPurchase.instance;
+  final prefs = await SharedPreferences.getInstance();
+
+  if (!await iap.isAvailable()) {
+    _isProChecking = false;
+    return;
+  }
+
+  // Initial Sync from local storage
+  ProStatus.isPro = prefs.getBool("isProUser") ?? false;
+  debugPrint("✅ ProStatus.isPro = ${ProStatus.isPro}");
+  // await iap.restorePurchases();
+  iap.purchaseStream.listen((purchases) async {
+    // 1. FILTER: We only look for 'purchased' or 'restored' items that match our IDs
+    bool hasActivePro = purchases.any((purchase) =>
+    (purchase.status == PurchaseStatus.purchased || purchase.status == PurchaseStatus.restored) &&
+        (purchase.productID == "pro_monthly" ||
+            purchase.productID == "pro_yearly" ||
+            purchase.productID == "refund_tracker_pro"));
+
+    // 2. HANDLE EXPIRATION / REVOCATION
+    if (hasActivePro) {
+      if (!ProStatus.isPro) {
+        await prefs.setBool("isProUser", true);
+        ProStatus.isPro = true;
+        debugPrint("Subscription Verified: User is PRO ✅");
+      }
+    } else {
+      // IF THE STORE RETURNS NOTHING: It means the sub is expired, cancelled, or refunded
+      if (ProStatus.isPro) {
+        await prefs.setBool("isProUser", false);
+        ProStatus.isPro = false;
+        debugPrint("Subscription Expired: Reverting to FREE ❌");
+      }
+    }
+
+    for (final purchase in purchases) {
+      if (purchase.pendingCompletePurchase) {
+        await iap.completePurchase(purchase);
+      }
+    }
+  });
+
+  try {
+    // This forces the App Store to tell us the CURRENT state of ownership
+    await iap.restorePurchases();
+  } catch (e) {
+    debugPrint("Restore error: $e");
+    _isProChecking = false;
+  }
+}
+
+Future<void> debugHardReset() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.clear(); // Wipes EVERYTHING local
+  ProStatus.isPro = false;
+  debugPrint("🚨 APP HARD RESET: User is now FREE.");
+}
+
 void main() async {
   // --- NATIVE SPLASH: PRESERVE LOGIC START ---
+
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   // --- NATIVE SPLASH: PRESERVE LOGIC END ---
 
   // --- ADDED: REQUIRED FOR NOTIFICATIONS TO WORK ---
+
   tz.initializeTimeZones();
+  debugHardReset();
+  final prefs = await SharedPreferences.getInstance();
+  ProStatus.isPro = prefs.getBool("isProUser") ?? false;
+
+  checkProStatus();
 
   // --- 9.2 RULE: NAVIGATE DIRECTLY TO RECEIPT DETAIL SCREEN ON TAP ---
   await NotificationService().init((String? payload) async {
@@ -123,7 +250,7 @@ void main() async {
     }
   });
   // Check if user has seen onboarding
-  final prefs = await SharedPreferences.getInstance();
+  // final prefs = await SharedPreferences.getInstance();
   final bool hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
 
   // Native Splash removal happens here if needed, or inside screens
@@ -202,9 +329,14 @@ class MyApp extends StatelessWidget {
         );
       },
       // --- IF/ELSE LOGIC ADDED HERE AS REQUESTED ---
-      home: notificationReceipt != null
-          ? ReceiptDetailScreen(receipt: notificationReceipt!)
-          : (showOnboarding ? const OnboardingScreen() : const OnboardingScreen()),
-    );
+    //   home: notificationReceipt != null
+    //       ? ReceiptDetailScreen(receipt: notificationReceipt!)
+    //       : (showOnboarding ? const OnboardingScreen() : const OnboardingScreen()),
+    // );
+        home: notificationReceipt != null
+            ? ReceiptDetailScreen(receipt: notificationReceipt!)
+            : (showOnboarding
+            ? const OnboardingScreen()
+            : const RefundListScreen()),);
   }
 }

@@ -1,8 +1,8 @@
-name:  projects
+name:  refund_tracker
 description: "OCR tracker"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.0+6
 
 environment:
   sdk: ^3.10.8
@@ -28,6 +28,7 @@ dependencies:
   path_provider: ^2.1.2
   flutter_timezone: ^3.0.1
   in_app_purchase: ^3.2.0
+  in_app_purchase_android: ^0.3.0+7
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
@@ -52,7 +53,6 @@ flutter_launcher_icons:
 # =================================================
 
 flutter_native_splash:
-
   background_image: "assets/picture/s.png"
 
   android_12:

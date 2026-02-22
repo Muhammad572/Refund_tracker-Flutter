@@ -119,3 +119,19 @@ class Refund {
     );
   }
 }
+
+class ProStatus {
+  static bool isPro = false;
+}
+
+class Plan {
+  final String id;
+  final String title;
+  final String displayPrice;
+
+  const Plan({
+    required this.id,
+    required this.title,
+    required this.displayPrice,
+  });
+}

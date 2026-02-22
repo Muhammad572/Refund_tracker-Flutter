@@ -1,8 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // SYSTEM NAVIGATOR KE LIYE ZAROORI HAI
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:permission_handler/permission_handler.dart';
 import '../services/database_service.dart';
@@ -185,6 +183,29 @@ class _RefundListScreenState extends State<RefundListScreen> {
     }
   }
 
+  Widget _buildReceiptImage(String? path) {
+    if (path == null || path.isEmpty) {
+      return const Icon(Icons.receipt);
+    }
+
+    final file = File(path);
+
+    if (!file.existsSync()) {
+      // file deleted by iOS → fallback UI
+      return const Icon(Icons.receipt);
+    }
+
+    return Image.file(
+      file,
+      width: 50,
+      height: 50,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) {
+        return const Icon(Icons.receipt);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -192,7 +213,6 @@ class _RefundListScreenState extends State<RefundListScreen> {
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
 
-        // ZABARDASTI: Sab khatam karke Onboarding par bhej raha hoon
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => const OnboardingScreen()),
@@ -204,7 +224,6 @@ class _RefundListScreenState extends State<RefundListScreen> {
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () {
-              // ZABARDASTI: App back button bhi Onboarding par hi jayega
               Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (context) => const OnboardingScreen()),
@@ -321,9 +340,10 @@ class _RefundListScreenState extends State<RefundListScreen> {
                         ).then((_) => _refresh());
                       },
                       child: ListTile(
-                        leading: data['imagePath'] != ""
-                            ? Image.file(File(data['imagePath']), width: 50, height: 50, fit: BoxFit.cover)
-                            : const Icon(Icons.receipt),
+                        // leading: data['imagePath'] != ""
+                        //     ? Image.file(File(data['imagePath']), width: 50, height: 50, fit: BoxFit.cover)
+                        //     : const Icon(Icons.receipt),
+                        leading: _buildReceiptImage(data['imagePath']),
                         title: Row(
                           children: [
                             Expanded(
