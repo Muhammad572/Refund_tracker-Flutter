@@ -24,12 +24,22 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+//    signingConfigs {
+//        create("release") {
+//            keyAlias = keystoreProperties["keyAlias"] as String
+//            keyPassword = keystoreProperties["keyPassword"] as String
+//            storeFile = file("upload-keystore.jks")
+//            storePassword = keystoreProperties["storePassword"] as String
+//        }
+//    }
+
     signingConfigs {
         create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
+            // Use 'as? String' to allow nulls, or 'toString()' to handle it safely
+            keyAlias = keystoreProperties["keyAlias"]?.toString()
+            keyPassword = keystoreProperties["keyPassword"]?.toString()
             storeFile = file("upload-keystore.jks")
-            storePassword = keystoreProperties["storePassword"] as String
+            storePassword = keystoreProperties["storePassword"]?.toString()
         }
     }
 

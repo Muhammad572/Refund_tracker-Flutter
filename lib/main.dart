@@ -143,6 +143,11 @@ void main() async {
   // --- NATIVE SPLASH: PRESERVE LOGIC START ---
 
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   // --- NATIVE SPLASH: PRESERVE LOGIC END ---
 

@@ -5,7 +5,7 @@ import 'dart:async';
 import 'dart:io';
 import '../models/receipt_model.dart';
 import 'ocr_screen.dart';
-
+import 'package:url_launcher/url_launcher.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   const SubscriptionScreen({super.key});
@@ -71,6 +71,14 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   void dispose() {
     _subscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      throw 'Could not launch $url';
+    }
   }
 
   Future<void> _initStore() async {
@@ -383,6 +391,19 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               );
             }).toList(),
           ),
+            const SizedBox(height: 20),
+
+            const Text(
+              "Payment will be charged to your Apple ID account at confirmation of purchase. "
+                  "Subscription automatically renews unless auto-renew is turned off at least 24 hours before the end of the current period. "
+                  "Your account will be charged for renewal within 24 hours prior to the end of the current period. "
+                  "You can manage or cancel your subscriptions in your App Store account settings.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 11,
+              ),
+            ),
             const SizedBox(height: 30),
 
             if (Platform.isIOS)
@@ -400,8 +421,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 GestureDetector(
-                  onTap: () =>
-                      _showLegal(context,"Privacy Policy",_privacyText),
+                  onTap: () => _openUrl(
+                      "https://sites.google.com/view/hasstech/refundtrack"),
+                  // onTap: () =>
+                  //     _showLegal(context,"Privacy Policy",_privacyText),
                   child: const Text(
                     "Privacy Policy",
                     style: TextStyle(
@@ -413,10 +436,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                 const Text(" | ",
                     style: TextStyle(color: Colors.grey)),
                 GestureDetector(
-                  onTap: () =>
-                      _showLegal(context,"Terms of Service",_termsText),
+                  onTap: () => _openUrl(
+                      "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"),
+                  // onTap: () =>
+                  //     _showLegal(context,"Terms of Service",_termsText),
                   child: const Text(
-                    "Terms of Service",
+                    "Terms of Use",
                     style: TextStyle(
                         color: Colors.grey,
                         decoration: TextDecoration.underline,
